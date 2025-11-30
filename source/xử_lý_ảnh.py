@@ -256,69 +256,55 @@ sam.to(device)
 predictor = SamPredictor(sam)
 
 
-# ==========================
-# Multi-point segmentation
-# ==========================
-def segment_multi_points(image, points_text):
-    """
-    points_text dạng:
-        120,200
-        150,180
-        100,250
-    """
+def click_and_segment(image, points, labels, point_type, evt: gr.SelectData):
+    if image is None:
+        return None, points, labels
 
-    if points_text.strip() == "":
-        return None
+    x, y = evt.index
 
-    # Parse danh sách điểm
-    pts = []
-    for line in points_text.split("\n"):
-        line = line.strip()
-        if line == "":
-            continue
-        try:
-            x, y = map(float, line.split(","))
-            pts.append([x, y])
-        except:
-            return "Sai format! Phải là: x,y"
+    # 1 = POS ; 0 = NEG
+    points.append([x, y])
+    labels.append(point_type)
 
-    pts = np.array(pts)
-    labels = np.ones(len(pts))  # Tất cả đều POSITIVE
+    img = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
+    predictor.set_image(img)
 
-    # Run SAM
-    image = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
-    predictor.set_image(image)
+    pts = np.array(points)
+    lbls = np.array(labels)
 
-    masks, scores, _ = predictor.predict(
+    masks, _, _ = predictor.predict(
         point_coords=pts,
-        point_labels=labels,
-        multimask_output=True
+        point_labels=lbls,
+        multimask_output=False
     )
 
-    mask = masks[0]
-    return (mask * 255).astype(np.uint8)
+    mask = (masks[0] * 255).astype(np.uint8)
+    return mask, points, labels
 
-
-# ==========================
-# Build UI
-# ==========================
 
 with gr.Blocks() as demo:
+    gr.Markdown("## 🟦 SAM Interactive Segmentation (POS / NEG)")
 
-    gr.Markdown("## 🟦 SAM Multi-Point Prompt Segmentation")
+    points_state = gr.State([])
+    labels_state = gr.State([])
+
+    point_type = gr.Radio(
+        label="Loại điểm",
+        choices=[("Positive", 1), ("Negative", 0)],
+        value=("Positive", 1),
+        type="value"
+    )
 
     with gr.Row():
         input_img = gr.Image(type="numpy", label="Input Image")
         output_mask = gr.Image(type="numpy", label="Mask Output")
 
-    points_box = gr.Textbox(
-        label="Nhập nhiều point (x,y mỗi dòng)",
-        placeholder="Ví dụ:\n120,200\n150,180\n100,250"
+    # Click event
+    input_img.select(
+        fn=click_and_segment,
+        inputs=[input_img, points_state, labels_state, point_type],
+        outputs=[output_mask, points_state, labels_state],
     )
 
-    run_btn = gr.Button("Chạy Multi-Point Segmentation")
-
-    run_btn.click(segment_multi_points, inputs=[input_img, points_box], outputs=output_mask)
-
-
 demo.launch(share=True)
+
